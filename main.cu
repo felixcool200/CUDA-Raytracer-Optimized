@@ -6,6 +6,7 @@
 #include <chrono>
 #include <vector>
 #include <string>
+#include <sys/time.h>
 
 #include "cuda_util.cuh"
 //#include "float3.cuh"
@@ -19,6 +20,18 @@ const int OBJ_COUNT = 19;
 
 //const int MAX_THREADS_PER_BLOCK = 1024;
 const int TPB = 16;
+
+//CPU Timer
+struct timeval t_start, t_end;
+void cputimer_start(){
+    gettimeofday(&t_start, 0);
+}
+double cputimer_stop(const char* info){
+    gettimeofday(&t_end, 0);
+    double time = (1000000.0*(t_end.tv_sec-t_start.tv_sec) + t_end.tv_usec-t_start.tv_usec);
+    printf("Timing - %s. \t\tElapsed %.0f microseconds \n", info, time);
+    return time;
+}
 
 using Color = float3;
 using namespace std::chrono;
@@ -145,8 +158,8 @@ __global__ void cast_ray(float3* fb, Sphere* spheres, Light *light, float3 *orig
     int i = (blockIdx.x * blockDim.x) + threadIdx.x;
     int j = (blockIdx.y * blockDim.y) + threadIdx.y;
 
-    int tid = (j*WIDTH) + i;
     if(i >= WIDTH || j >= HEIGHT) return;
+    int tid = (j*WIDTH) + i;
 
     float3 ij = make_float3(2 * (float((i) + 0.5) / (WIDTH - 1)) - 1, 1 - 2 * (float((j) + 0.5) / (HEIGHT - 1)), -1);
     float3 dir = ij - *origin;
@@ -178,43 +191,62 @@ void run_kernel(const int size, float3* fb, Sphere* spheres, Light* light, float
     Light* light_dv = nullptr;
     float3* origin_dv = nullptr;
 
-    //printf("Sizes: fb:%d, Sphere:%d, Light:%d, origin: %d\n",sizeof(float3) * size, sizeof(Sphere) * OBJ_COUNT,sizeof(Light),sizeof(float3));
+    std::cout << "Size is: " << sizeof(float3) * size << std::endl;
+
+    cputimer_start();
 
     checkErrorsCuda(cudaMalloc((void**) &fb_device, sizeof(float3) * size));
-    checkErrorsCuda(cudaMemcpy((void*) fb_device, fb, sizeof(float3) * size, cudaMemcpyHostToDevice));
-
     checkErrorsCuda(cudaMalloc((void**) &spheres_dv, sizeof(Sphere) * OBJ_COUNT));
-    checkErrorsCuda(cudaMemcpy((void*) spheres_dv, spheres, sizeof(Sphere) * OBJ_COUNT, cudaMemcpyHostToDevice));
-
     checkErrorsCuda(cudaMalloc((void**) &light_dv, sizeof(Light) * 1));
-    checkErrorsCuda(cudaMemcpy((void*) light_dv, light, sizeof(Light) * 1, cudaMemcpyHostToDevice));
-
     checkErrorsCuda(cudaMalloc((void**) &origin_dv, sizeof(float3) * 1));
+
+    cputimer_stop("CUDA Memory Allocation");
+    cputimer_start();
+
+    //checkErrorsCuda(cudaMemset(fb_device,0,sizeof(float3) * size));
+    //checkErrorsCuda(cudaMemcpy((void*) fb_device, fb, sizeof(float3) * size, cudaMemcpyHostToDevice));
+    checkErrorsCuda(cudaMemcpy((void*) spheres_dv, spheres, sizeof(Sphere) * OBJ_COUNT, cudaMemcpyHostToDevice));
+    checkErrorsCuda(cudaMemcpy((void*) light_dv, light, sizeof(Light) * 1, cudaMemcpyHostToDevice));
     checkErrorsCuda(cudaMemcpy((void*) origin_dv, origin, sizeof(float3) * 1, cudaMemcpyHostToDevice));
 
+    cputimer_stop("CUDA HtoD memory transfer");
+
+    //cputimer_start();
+
+    //cputimer_stop("CUDA HtoD memory transfer");
+
+    /*
     cudaEvent_t start, stop;
     float time = 0;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start, 0);
+    */
+    cputimer_start();
 
     dim3 blocks(WIDTH / TPB, HEIGHT / TPB);
     cast_ray<<<blocks, dim3(TPB, TPB)>>>(fb_device, spheres_dv, light_dv, origin_dv);
-    
+    cudaDeviceSynchronize();
+    cputimer_stop("CUDA Kernal Launch Runtime");
+
+    /*
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&time, start, stop);
     printf(">> time for kernel: %f ms\n", time);
 
-    checkErrorsCuda(cudaMemcpy(fb, fb_device, sizeof(float3) * size, cudaMemcpyDeviceToHost));
-
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
+    */
+    cputimer_start();
 
+    checkErrorsCuda(cudaMemcpy(fb, fb_device, sizeof(float3) * size, cudaMemcpyDeviceToHost));
+    
+    cputimer_stop("CUDA DtoH memory transfer");
     checkErrorsCuda(cudaFree(fb_device));
     checkErrorsCuda(cudaFree(spheres_dv));
-    //checkErrorsCuda(cudaFree(light_dv));
-    //checkErrorsCuda(cudaFree(origin_dv));
+    checkErrorsCuda(cudaFree(light_dv));
+    checkErrorsCuda(cudaFree(origin_dv));
 }
 
 int main(int, char**) {
@@ -223,7 +255,9 @@ int main(int, char**) {
     const int n = WIDTH * HEIGHT;
     int device_handle = 0;
 
-    float3* frame_buffer = new float3[n];
+    //float3* frame_buffer = new float3[n];
+    float3* frame_buffer;
+    cudaMallocHost((void**)&frame_buffer, sizeof(float3) * n,cudaHostAllocDefault);
     std::vector<std::string> mem_buffer;
 
     int deviceCount = 0;
@@ -298,7 +332,8 @@ int main(int, char**) {
     std::cout << ">> Finished writing to file in " << end << " ms" << std::endl;
     std::cout << "===========================================" << std::endl;
 
-    delete[] frame_buffer;
+    //delete[] frame_buffer;
+    cudaFreeHost(frame_buffer);
     delete origin;
     delete light;
     delete[] spheres;
