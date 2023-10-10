@@ -6,7 +6,6 @@
 #include <chrono>
 #include <vector>
 #include <string>
-#include <sys/time.h>
 
 #include "cuda_util.cuh"
 //#include "float3.cuh"
@@ -22,15 +21,17 @@ const int OBJ_COUNT = 19;
 const int TPB = 16;
 
 //CPU Timer
-struct timeval t_start, t_end;
+auto start = std::chrono::high_resolution_clock::now();
+auto elapsed = std::chrono::high_resolution_clock::now() - start;
+
 void cputimer_start(){
-    gettimeofday(&t_start, 0);
+    start = std::chrono::high_resolution_clock::now();
 }
-double cputimer_stop(const char* info){
-    gettimeofday(&t_end, 0);
-    double time = (1000000.0*(t_end.tv_sec-t_start.tv_sec) + t_end.tv_usec-t_start.tv_usec);
-    printf("Timing - %s. \t\tElapsed %.0f microseconds \n", info, time);
-    return time;
+long cputimer_stop(const char* info){
+    elapsed = std::chrono::high_resolution_clock::now() - start;
+    long microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+    std::cout << "Timing - " << info << ". \t\tElapsed " << microseconds << " microseconds" << std::endl;
+    return microseconds;
 }
 
 using Color = float3;
