@@ -110,6 +110,7 @@ __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* in
 }
 
 __device__ Color get_color_at(const Ray &r, float intersection, Light* light, const Sphere &sphere, Sphere* spheres, float3* origin) {
+    const int offset_surface = 0.001f;
     float shadow = 1;
 
     float3 normal = sphere.get_normal_at(r.at(intersection));
@@ -123,14 +124,14 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light* light, co
     float3 reflection_ray = (-1 * light_ray) - 2 * dot((-1 * light_ray), normal) * normal;
     reflection_ray = normalizeVec3(reflection_ray);
 
-    Ray rr(r.at(intersection) + 0.001 * normal, reflection_ray);
+    Ray rr(r.at(intersection) + offset_surface * normal, reflection_ray);
     float intersections[OBJ_COUNT];
     int hp = get_closest_intersection(spheres, rr, intersections);
     bool reflect = false;
     float reflect_shadow = 1;
     if (hp != -1) {
         reflect = true;
-        Ray rs(rr.at(intersections[hp]) + 0.001 * spheres[hp].get_normal_at(rr.at(intersections[hp])), light->get_position() - rr.at(intersections[hp]) + 0.001 * spheres[hp].get_normal_at(rr.at(intersections[hp])));
+        Ray rs(rr.at(intersections[hp]) + offset_surface * spheres[hp].get_normal_at(rr.at(intersections[hp])), light->get_position() - rr.at(intersections[hp]) + offset_surface * spheres[hp].get_normal_at(rr.at(intersections[hp])));
         for (int i = 0; i < OBJ_COUNT; ++i) {
             if (rs.has_intersection(spheres[i]) > 0.000001f) reflect_shadow = 0.35;
         }
@@ -140,7 +141,7 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light* light, co
     auto diffuse = (light->get_diffuse() * fmaxf(dot(light_ray, normal), 0.0f)) * light->get_color();
     auto specular = light->get_specular() * pow(fmaxf(dot(reflection_ray, to_camera), 0.0f), 32) * light->get_color();
 
-    Ray shadow_ray(r.at(intersection) + (0.001f * normal), light->get_position() - (r.at(intersection) + 0.001f * normal));
+    Ray shadow_ray(r.at(intersection) + (offset_surface * normal), light->get_position() - (r.at(intersection) + offset_surface * normal));
     for (int i = 0; i < OBJ_COUNT; ++i) {
         if (shadow_ray.has_intersection(spheres[i]) > 0.000001f) shadow = 0.35;
     }
