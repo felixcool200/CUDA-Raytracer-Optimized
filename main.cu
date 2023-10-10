@@ -110,7 +110,7 @@ __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* in
 }
 
 __device__ Color get_color_at(const Ray &r, float intersection, Light* light, const Sphere &sphere, Sphere* spheres, float3* origin) {
-    const int offset_surface = 0.001f;
+    const float offset_surface = 0.001f;
     float shadow = 1;
 
     float3 normal = sphere.get_normal_at(r.at(intersection));
