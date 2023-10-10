@@ -14,7 +14,8 @@
 
 const int WIDTH = 8192;
 const int HEIGHT = 8192;
-const int OBJ_COUNT = 19;
+#define OBJ_COUNT 19
+//const int OBJ_COUNT = 19;
 //#define OBJ_COUNT sizeof(spheres) / sizeof(Sphere)
 
 //const int MAX_THREADS_PER_BLOCK = 1024;
@@ -91,27 +92,27 @@ __device__ Color convert_to_color(const float3 &v) {
 }
 
 __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* intersections) {
-    int hp = -1;
-    for(int ii = 0; ii < OBJ_COUNT; ii++) {
-        intersections[ii] = r.has_intersection(spheres[ii]);
-    }
-
-    int asize = OBJ_COUNT;
-    if(asize == 1) {
-        hp = intersections[0] < 0 ? -1 : 0;
-    } else {
-        if(asize != 0) {
-            float min_val = 100.0;
-            for (int ii = 0; ii < asize; ii++) {
-                if (intersections[ii] < 0.0) continue;
-                else if (intersections[ii] < min_val) {
-                    min_val = intersections[ii];
-                    hp = ii;
-                }
+    #if OBJ_COUNT == 0
+        return -1;
+    #elif OBJ_COUNT == 1
+        intersections[0] = r.has_intersection(spheres[ii]);
+        return intersections[0] < 0 ? -1 : 0;
+    #else
+        int hp = -1;
+        for(int ii = 0; ii < OBJ_COUNT; ii++) {
+            intersections[ii] = r.has_intersection(spheres[ii]);
+        }
+        float min_val = 100.0;
+        for (int ii = 0; ii < OBJ_COUNT; ++ii) {
+            // TODO: make illegal values large to remove the extra if statment.
+            if (intersections[ii] < 0.0) continue;
+            else if (intersections[ii] < min_val) {
+                min_val = intersections[ii];
+                hp = ii;
             }
         }
-    }
-    return hp;
+        return hp;
+    #endif
 }
 
 __device__ Color get_color_at(const Ray &r, float intersection, Light* light, const Sphere &sphere, Sphere* spheres, float3* origin) {
@@ -259,7 +260,7 @@ int main(int, char**) {
     //float3* frame_buffer = new float3[n];
     float3* frame_buffer;
     cudaMallocHost((void**)&frame_buffer, sizeof(float3) * n,cudaHostAllocDefault);
-    std::vector<std::string> mem_buffer;
+    //std::vector<std::string> mem_buffer;
 
     int deviceCount = 0;
     checkErrorsCuda(cudaGetDeviceCount(&deviceCount));
@@ -322,12 +323,15 @@ int main(int, char**) {
 
     file << "P3" << "\n" << WIDTH << " " << HEIGHT << "\n" << "255\n";
     for (std::size_t i = 0; i < n; ++i) {
+        file << (int) frame_buffer[i].x << " " << (int) frame_buffer[i].y << " " << (int) frame_buffer[i].z << "\n";
+        /*
         mem_buffer.push_back(std::to_string((int) frame_buffer[i].x) + " " + 
                              std::to_string((int) frame_buffer[i].y) + " " + 
                              std::to_string((int) frame_buffer[i].z));
+        */
     }
-    std::ostream_iterator<std::string> output_iterator(file, "\n");
-    std::copy(mem_buffer.begin(), mem_buffer.end(), output_iterator);
+    //std::ostream_iterator<std::string> output_iterator(file, "\n");
+    //std::copy(mem_buffer.begin(), mem_buffer.end(), output_iterator);
 
     auto end = duration_cast<milliseconds>(steady_clock::now() - start).count();
     std::cout << ">> Finished writing to file in " << end << " ms" << std::endl;
