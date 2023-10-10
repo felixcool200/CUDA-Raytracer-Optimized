@@ -67,11 +67,11 @@ __host__ __device__ float3 Ray::at(float t) const {
 }
 
 __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
-    auto a = dot(dir, dir);
-    auto b = dot((2.0f * (dir)), (origin - sphere.center));
-    auto c = dot((origin - sphere.center), (origin - sphere.center)) - pow(sphere.radius, 2);
+    float a = dot(dir, dir);
+    float b = dot((2.0f * (dir)), (origin - sphere.center));
+    float c = dot((origin - sphere.center), (origin - sphere.center)) - pow(sphere.radius, 2);
 
-    auto d = b*b - 4 * (a * c);
+    float d = b*b - 4 * (a * c);
     if(d < 0) return -1.0;
 
     float t0 = ((-b - std::sqrt(d)) / (2*a));
@@ -80,15 +80,12 @@ __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
     if(t0 < 0 && t1 < 0) return -1;
     if(t0 > 0 && t1 < 0) return t0;
     if(t0 < 0 && t1 > 0) return t1;
-    return t0 < t1 ? t0 : t1;
-}
-
-__device__ constexpr float f_max(float a, float b) {
-    return a > b ? a : b;
+    return fminf(t0,t1);
+    //return t0 < t1 ? t0 : t1;
 }
 
 __device__ Color convert_to_color(const float3 &v) {
-    return make_float3(static_cast<int>(1 * ((v.x) * 255.999)), static_cast<int>(1 * ((v.y) * 255.999)), static_cast<int>(1 * ((v.z) * 255.999)));
+    return make_float3(static_cast<int>((v.x) * 255.999), static_cast<int>((v.y) * 255.999), static_cast<int>((v.z) * 255.999));
 }
 
 __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* intersections) {
@@ -99,12 +96,9 @@ __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* in
         return intersections[0] < 0 ? -1 : 0;
     #else
         int hp = -1;
-        for(int ii = 0; ii < OBJ_COUNT; ii++) {
-            intersections[ii] = r.has_intersection(spheres[ii]);
-        }
         float min_val = 100.0;
-        for (int ii = 0; ii < OBJ_COUNT; ++ii) {
-            // TODO: make illegal values large to remove the extra if statment.
+        for(int ii = 0; ii < OBJ_COUNT; ++ii) {
+            intersections[ii] = r.has_intersection(spheres[ii]);
             if (intersections[ii] < 0.0) continue;
             else if (intersections[ii] < min_val) {
                 min_val = intersections[ii];
@@ -143,8 +137,8 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light* light, co
     }
 
     auto ambient = light->get_ambient() * light->get_color(); 
-    auto diffuse = (light->get_diffuse() * f_max(dot(light_ray, normal), 0.0f)) * light->get_color();
-    auto specular = light->get_specular() * pow(f_max(dot(reflection_ray, to_camera), 0.0f), 32) * light->get_color();
+    auto diffuse = (light->get_diffuse() * fmaxf(dot(light_ray, normal), 0.0f)) * light->get_color();
+    auto specular = light->get_specular() * pow(fmaxf(dot(reflection_ray, to_camera), 0.0f), 32) * light->get_color();
 
     Ray shadow_ray(r.at(intersection) + (0.001f * normal), light->get_position() - (r.at(intersection) + 0.001f * normal));
     for (int i = 0; i < OBJ_COUNT; ++i) {
