@@ -69,7 +69,7 @@ __host__ __device__ float3 Ray::at(float t) const {
 __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
     float a = dot(dir, dir);
     float b = dot((2.0f * (dir)), (origin - sphere.center));
-    float c = dot((origin - sphere.center), (origin - sphere.center)) - pow(sphere.radius, 2);
+    #define c dot((origin - sphere.center), (origin - sphere.center)) - pow(sphere.radius, 2)
 
     float d = b*b - 4 * (a * c);
     if(d < 0) return -1.0;
@@ -110,7 +110,7 @@ __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* in
 }
 
 __device__ Color get_color_at(const Ray &r, float intersection, Light* light, const Sphere &sphere, Sphere* spheres, float3* origin) {
-    const float offset_surface = 0.001f;
+    #define offset_surface 0.001f
     float shadow = 1;
 
     float3 normal = sphere.get_normal_at(r.at(intersection));
@@ -137,17 +137,22 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light* light, co
         }
     }
 
+    /*
     auto ambient = light->get_ambient() * light->get_color(); 
     auto diffuse = (light->get_diffuse() * fmaxf(dot(light_ray, normal), 0.0f)) * light->get_color();
     auto specular = light->get_specular() * pow(fmaxf(dot(reflection_ray, to_camera), 0.0f), 32) * light->get_color();
-
+    //ambientDiffuseSpecular was ambient+diffuse+specular 
+    */
+    auto ambientDiffuseSpecular = light->get_ambient() * light->get_color(); 
+    ambientDiffuseSpecular = ((light->get_diffuse() * fmaxf(dot(light_ray, normal), 0.0f)) * light->get_color()) + ambientDiffuseSpecular;
+    ambientDiffuseSpecular = (light->get_specular() * pow(fmaxf(dot(reflection_ray, to_camera), 0.0f), 32) * light->get_color()) + ambientDiffuseSpecular;
+    
     Ray shadow_ray(r.at(intersection) + (offset_surface * normal), light->get_position() - (r.at(intersection) + offset_surface * normal));
     for (int i = 0; i < OBJ_COUNT; ++i) {
         if (shadow_ray.has_intersection(spheres[i]) > 0.000001f) shadow = 0.35;
     }
-
-    auto all_light = reflect ? capVec3 ((ambient + diffuse + specular),1) & (0.55 * (sphere.color - (reflect_shadow * spheres[hp].color))) + capVec3((reflect_shadow * spheres[hp].color),1)
-                             : capVec3((ambient + diffuse + specular),1) & sphere.color;
+    auto all_light = reflect ? capVec3 ((ambientDiffuseSpecular),1) & (0.55 * (sphere.color - (reflect_shadow * spheres[hp].color))) + capVec3((reflect_shadow * spheres[hp].color),1)
+                             : capVec3((ambientDiffuseSpecular),1) & sphere.color;
     return convert_to_color(shadow * all_light);
 }
 
@@ -156,11 +161,11 @@ __global__ void cast_ray(float3* fb, Sphere* spheres, Light *light, float3 *orig
     int j = (blockIdx.y * blockDim.y) + threadIdx.y;
 
     if(i >= WIDTH || j >= HEIGHT) return;
-    int tid = (j*WIDTH) + i;
+    #define tid (j*WIDTH) + i
+    //int tid = (j*WIDTH) + i;
 
-    float3 ij = make_float3(2 * (float((i) + 0.5) / (WIDTH - 1)) - 1, 1 - 2 * (float((j) + 0.5) / (HEIGHT - 1)), -1);
-    float3 dir = ij - *origin;
-    Ray r(*origin, dir);
+    #define ij make_float3(2 * (float((i) + 0.5) / (WIDTH - 1)) - 1, 1 - 2 * (float((j) + 0.5) / (HEIGHT - 1)), -1)
+    Ray r(*origin, ij - *origin);
 
     float intersections[OBJ_COUNT];
     int hp = get_closest_intersection(spheres, r, intersections);
@@ -168,8 +173,7 @@ __global__ void cast_ray(float3* fb, Sphere* spheres, Light *light, float3 *orig
     if(hp == -1) {
         fb[tid] = make_float3(94, 156, 255);
     } else {
-        auto color = get_color_at(r, intersections[hp], light, spheres[hp], spheres, origin);
-        fb[tid] = color;
+        fb[tid] = get_color_at(r, intersections[hp], light, spheres[hp], spheres, origin);
     }
 }
 
