@@ -19,7 +19,7 @@ const int HEIGHT = 8192;
 //#define OBJ_COUNT sizeof(spheres) / sizeof(Sphere)
 
 //const int MAX_THREADS_PER_BLOCK = 1024;
-const int TPB = 16;
+const int TPB = 32;
 
 //CPU Timer
 auto start = std::chrono::high_resolution_clock::now();
@@ -67,19 +67,37 @@ __host__ __device__ float3 Ray::at(float t) const {
 }
 
 __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
-    float a = dot(dir, dir);
-    float b = dot((2.0f * (dir)), (origin - sphere.center));
-    #define c (dot((origin - sphere.center), (origin - sphere.center)) - pow(sphere.radius, 2))
+    const float a = dot(dir, dir);
+    const float b = dot((2.0f * dir), (origin - sphere.center));
+    const float c =  dot((origin - sphere.center), (origin - sphere.center)) - pow(sphere.radius, 2);
 
-    float d = b*b - 4 * (a * c);
-    if(d < 0) return -1.0;
+    const float d = b*b - 4 * (a * c);
+    
+    if(d < 0){
+        return -1;
+    } 
 
     float t0 = ((-b - std::sqrt(d)) / (2*a));
     float t1 = ((-b + std::sqrt(d)) / (2*a));
-    if(d == 0) return t0;
-    if(t0 < 0 && t1 < 0) return -1;
-    if(t0 > 0 && t1 < 0) return t0;
-    if(t0 < 0 && t1 > 0) return t1;
+    
+    /*if (t0 < 0){
+        printf("T0: %f\n",t0);
+    }
+    if(t1 < 0){
+        printf("T1: %f\n",t1);
+    }*/
+
+    if(d == 0 || t0 > 0 && t1 < 0) {
+        return t0;
+    }
+    
+    if(t0 < 0 && t1 < 0) {
+        return -1;
+    }
+
+    if(t0 < 0 && t1 > 0) {
+        return t1;
+    }
     return fminf(t0,t1);
     //return t0 < t1 ? t0 : t1;
 }
@@ -96,12 +114,16 @@ __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* in
         return intersections[0] < 0 ? -1 : 0;
     #else
         int hp = -1;
-        float min_val = 100.0;
+        *intersections = 100.0;
+        float tmp_intersection;
         for(int ii = 0; ii < OBJ_COUNT; ++ii) {
-            intersections[ii] = r.has_intersection(spheres[ii]);
-            if (intersections[ii] < 0.0) continue;
-            else if (intersections[ii] < min_val) {
-                min_val = intersections[ii];
+            //intersections[ii] = r.has_intersection(spheres[ii]);
+            tmp_intersection = r.has_intersection(spheres[ii]);
+            if (tmp_intersection < 0.0) {
+                continue;
+            }
+            else if (tmp_intersection < *intersections) {
+                *intersections = tmp_intersection;
                 hp = ii;
             }
         }
@@ -110,7 +132,7 @@ __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* in
 }
 
 __device__ Color get_color_at(const Ray &r, float intersection, Light* light, const Sphere &sphere, Sphere* spheres, float3* origin) {
-    #define offset_surface 0.001f
+    const float offset_surface = 0.001;
     float shadow = 1;
 
     float3 normal = sphere.get_normal_at(r.at(intersection));
@@ -125,15 +147,18 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light* light, co
     reflection_ray = normalizeVec3(reflection_ray);
 
     Ray rr(r.at(intersection) + offset_surface * normal, reflection_ray);
-    float intersections[OBJ_COUNT];
-    int hp = get_closest_intersection(spheres, rr, intersections);
+    //float intersections[OBJ_COUNT];
+    float closest_intersection;
+    int hp = get_closest_intersection(spheres, rr, &closest_intersection);
     bool reflect = false;
     float reflect_shadow = 1;
     if (hp != -1) {
         reflect = true;
-        Ray rs(rr.at(intersections[hp]) + offset_surface * spheres[hp].get_normal_at(rr.at(intersections[hp])), light->get_position() - rr.at(intersections[hp]) + offset_surface * spheres[hp].get_normal_at(rr.at(intersections[hp])));
+        Ray rs(rr.at(closest_intersection) + offset_surface * spheres[hp].get_normal_at(rr.at(closest_intersection)), light->get_position() - rr.at(closest_intersection) + offset_surface * spheres[hp].get_normal_at(rr.at(closest_intersection)));
         for (int i = 0; i < OBJ_COUNT; ++i) {
-            if (rs.has_intersection(spheres[i]) > 0.000001f) reflect_shadow = 0.35;
+            if (rs.has_intersection(spheres[i]) > 0.000001f) {
+                reflect_shadow = 0.35;
+            }
         }
     }
 
@@ -143,7 +168,8 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light* light, co
     auto specular = light->get_specular() * pow(fmaxf(dot(reflection_ray, to_camera), 0.0f), 32) * light->get_color();
     //ambientDiffuseSpecular was ambient+diffuse+specular 
     */
-    auto ambientDiffuseSpecular = light->get_ambient() * light->get_color(); 
+
+    float3 ambientDiffuseSpecular = light->get_ambient() * light->get_color(); 
     ambientDiffuseSpecular = ((light->get_diffuse() * fmaxf(dot(light_ray, normal), 0.0f)) * light->get_color()) + ambientDiffuseSpecular;
     ambientDiffuseSpecular = (light->get_specular() * pow(fmaxf(dot(reflection_ray, to_camera), 0.0f), 32) * light->get_color()) + ambientDiffuseSpecular;
     
@@ -161,19 +187,20 @@ __global__ void cast_ray(float3* fb, Sphere* spheres, Light *light, float3 *orig
     int j = (blockIdx.y * blockDim.y) + threadIdx.y;
 
     if(i >= WIDTH || j >= HEIGHT) return;
-    #define tid (j*WIDTH) + i
+    const int tid = (j*WIDTH) + i;
     //int tid = (j*WIDTH) + i;
 
-    #define ij make_float3(2 * (float((i) + 0.5) / (WIDTH - 1)) - 1, 1 - 2 * (float((j) + 0.5) / (HEIGHT - 1)), -1)
+    const float3 ij = make_float3(2 * (float((i) + 0.5) / (WIDTH - 1)) - 1, 1 - 2 * (float((j) + 0.5) / (HEIGHT - 1)), -1);
     Ray r(*origin, ij - *origin);
 
-    float intersections[OBJ_COUNT];
-    int hp = get_closest_intersection(spheres, r, intersections);
+    //float intersections[OBJ_COUNT];
+    float closest_intersection;
+    int hp = get_closest_intersection(spheres, r, &closest_intersection);
 
     if(hp == -1) {
         fb[tid] = make_float3(94, 156, 255);
     } else {
-        fb[tid] = get_color_at(r, intersections[hp], light, spheres[hp], spheres, origin);
+        fb[tid] = get_color_at(r, closest_intersection, light, spheres[hp], spheres, origin);
     }
 }
 
