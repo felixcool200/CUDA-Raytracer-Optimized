@@ -43,7 +43,7 @@ __host__ __device__ float3 capVec3(const float3 &a,const float max) {
 
 // free functions
 
-__host__ __device__ float3 operator*(float a, const float3 &b) {
+__host__ __device__ float3 operator*(const float a, const float3 &b) {
     return make_float3(a * b.x, a * b.y, a * b.z);
 }
 

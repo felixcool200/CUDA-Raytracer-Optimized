@@ -18,18 +18,21 @@ const int HEIGHT = 8192;
 //const int OBJ_COUNT = 19;
 //#define OBJ_COUNT sizeof(spheres) / sizeof(Sphere)
 
+#define tidGLOBAL ((blockIdx.y * blockDim.y) + threadIdx.y*WIDTH) + (blockIdx.x * blockDim.x) + threadIdx.x
+
+
 //const int MAX_THREADS_PER_BLOCK = 1024;
 const int TPB = 32;
 
 //CPU Timer
-auto start = std::chrono::high_resolution_clock::now();
-auto elapsed = std::chrono::high_resolution_clock::now() - start;
+auto start_CPU = std::chrono::high_resolution_clock::now();
+auto elapsed = std::chrono::high_resolution_clock::now() - start_CPU;
 
 void cputimer_start(){
-    start = std::chrono::high_resolution_clock::now();
+    start_CPU = std::chrono::high_resolution_clock::now();
 }
 long cputimer_stop(const char* info){
-    elapsed = std::chrono::high_resolution_clock::now() - start;
+    elapsed = std::chrono::high_resolution_clock::now() - start_CPU;
     long microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
     std::cout << "Timing - " << info << ". \t\tElapsed " << microseconds << " microseconds" << std::endl;
     return microseconds;
@@ -69,24 +72,24 @@ __host__ __device__ float3 Ray::at(float t) const {
 __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
     const float a = dot(dir, dir);
     const float b = dot((2.0f * dir), (origin - sphere.center));
-    const float c =  dot((origin - sphere.center), (origin - sphere.center)) - pow(sphere.radius, 2);
+    const float c =  dot((origin - sphere.center), (origin - sphere.center)) - sphere.radius*sphere.radius;
 
     const float d = b*b - 4 * (a * c);
     
     if(d < 0){
-        return -1;
+        return -1.0;
     } 
 
     float t0 = ((-b - std::sqrt(d)) / (2*a));
     float t1 = ((-b + std::sqrt(d)) / (2*a));
-    
-    /*if (t0 < 0){
-        printf("T0: %f\n",t0);
-    }
-    if(t1 < 0){
-        printf("T1: %f\n",t1);
-    }*/
 
+    bool t0_is_neg = t0 < 0;
+    bool t1_is_neg = t1 < 0;
+
+    //Optimzed for SIMD
+    return (t0_is_neg*t1_is_neg * -1) + (t0_is_neg*!t1_is_neg * t1) + (!t0_is_neg*t1_is_neg *t0) + (!t0_is_neg*!t1_is_neg *fminf(t0,t1));
+
+    /*
     if(d == 0 || t0 > 0 && t1 < 0) {
         return t0;
     }
@@ -100,10 +103,11 @@ __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
     }
     return fminf(t0,t1);
     //return t0 < t1 ? t0 : t1;
+    */
 }
 
 __device__ Color convert_to_color(const float3 &v) {
-    return make_float3(static_cast<int>((v.x) * 255.999), static_cast<int>((v.y) * 255.999), static_cast<int>((v.z) * 255.999));
+    return make_float3(v.x * 255.999, (v.y * 255.999), (v.z * 255.999));
 }
 
 __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* intersections) {
@@ -131,16 +135,17 @@ __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* in
     #endif
 }
 
-__device__ Color get_color_at(const Ray &r, float intersection, Light* light, const Sphere &sphere, Sphere* spheres, float3* origin) {
+__device__ Color get_color_at(const Ray &r, float intersection, Light light, const Sphere &sphere, Sphere* spheres, float3 origin) {
+    //long start = clock();
     const float offset_surface = 0.001;
-    float shadow = 1;
+    float shadow = 1.0;
 
     float3 normal = sphere.get_normal_at(r.at(intersection));
 
-    float3 to_camera(*origin - r.at(intersection));
+    float3 to_camera(origin - r.at(intersection));
     to_camera = normalizeVec3(to_camera);
 
-    float3 light_ray(light->get_position() - r.at(intersection));
+    float3 light_ray(light.get_position() - r.at(intersection));
     light_ray = normalizeVec3(light_ray);
 
     float3 reflection_ray = (-1 * light_ray) - 2 * dot((-1 * light_ray), normal) * normal;
@@ -154,10 +159,11 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light* light, co
     float reflect_shadow = 1;
     if (hp != -1) {
         reflect = true;
-        Ray rs(rr.at(closest_intersection) + offset_surface * spheres[hp].get_normal_at(rr.at(closest_intersection)), light->get_position() - rr.at(closest_intersection) + offset_surface * spheres[hp].get_normal_at(rr.at(closest_intersection)));
+        Ray rs(rr.at(closest_intersection) + offset_surface * spheres[hp].get_normal_at(rr.at(closest_intersection)), light.get_position() - rr.at(closest_intersection) + offset_surface * spheres[hp].get_normal_at(rr.at(closest_intersection)));
         for (int i = 0; i < OBJ_COUNT; ++i) {
-            if (rs.has_intersection(spheres[i]) > 0.000001f) {
+            if (rs.has_intersection(spheres[i])  > 0.000001f) {
                 reflect_shadow = 0.35;
+                break;
             }
         }
     }
@@ -169,20 +175,27 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light* light, co
     //ambientDiffuseSpecular was ambient+diffuse+specular 
     */
 
-    float3 ambientDiffuseSpecular = light->get_ambient() * light->get_color(); 
-    ambientDiffuseSpecular = ((light->get_diffuse() * fmaxf(dot(light_ray, normal), 0.0f)) * light->get_color()) + ambientDiffuseSpecular;
-    ambientDiffuseSpecular = (light->get_specular() * pow(fmaxf(dot(reflection_ray, to_camera), 0.0f), 32) * light->get_color()) + ambientDiffuseSpecular;
+    float3 ambientDiffuseSpecular = light.get_ambient() * light.get_color(); 
+    ambientDiffuseSpecular = ((light.get_diffuse() * fmaxf(dot(light_ray, normal), 0.0f)) * light.get_color()) + ambientDiffuseSpecular;
+    ambientDiffuseSpecular = (light.get_specular() * pow(fmaxf(dot(reflection_ray, to_camera), 0.0f), 32) * light.get_color()) + ambientDiffuseSpecular;
     
-    Ray shadow_ray(r.at(intersection) + (offset_surface * normal), light->get_position() - (r.at(intersection) + offset_surface * normal));
+    Ray shadow_ray(r.at(intersection) + (offset_surface * normal), light.get_position() - (r.at(intersection) + offset_surface * normal));
     for (int i = 0; i < OBJ_COUNT; ++i) {
-        if (shadow_ray.has_intersection(spheres[i]) > 0.000001f) shadow = 0.35;
+        if (shadow_ray.has_intersection(spheres[i]) > 0.000001f){
+            shadow = 0.35;
+            break;
+        }
     }
     auto all_light = reflect ? capVec3 ((ambientDiffuseSpecular),1) & (0.55 * (sphere.color - (reflect_shadow * spheres[hp].color))) + capVec3((reflect_shadow * spheres[hp].color),1)
                              : capVec3((ambientDiffuseSpecular),1) & sphere.color;
+    /*if(tidGLOBAL == 0){
+        long stop = clock();
+        printf("get_color_at: %08lu",stop-start);
+    }*/
     return convert_to_color(shadow * all_light);
 }
 
-__global__ void cast_ray(float3* fb, Sphere* spheres, Light *light, float3 *origin) {
+__global__ void cast_ray(float3* fb, Sphere* spheres, Light light, float3 origin) {
     int i = (blockIdx.x * blockDim.x) + threadIdx.x;
     int j = (blockIdx.y * blockDim.y) + threadIdx.y;
 
@@ -191,7 +204,7 @@ __global__ void cast_ray(float3* fb, Sphere* spheres, Light *light, float3 *orig
     //int tid = (j*WIDTH) + i;
 
     const float3 ij = make_float3(2 * (float((i) + 0.5) / (WIDTH - 1)) - 1, 1 - 2 * (float((j) + 0.5) / (HEIGHT - 1)), -1);
-    Ray r(*origin, ij - *origin);
+    Ray r(origin, ij - origin);
 
     //float intersections[OBJ_COUNT];
     float closest_intersection;
@@ -213,11 +226,13 @@ void initDevice(int& device_handle) {
 }
 
 //void run_kernel(const int size, float3* fb, Sphere* spheres, Light* light, float3* origin) {
-void run_kernel(const int size, float3* fb, Sphere* spheres, Light* light, float3* origin) {
+void run_kernel(const int size, float3* fb, Sphere* spheres, Light light, float3 origin) {
     float3* fb_device = nullptr;
     Sphere* spheres_dv = nullptr;
+    /*
     Light* light_dv = nullptr;
     float3* origin_dv = nullptr;
+    */
 
     std::cout << "Size is: " << sizeof(float3) * size << std::endl;
 
@@ -225,17 +240,20 @@ void run_kernel(const int size, float3* fb, Sphere* spheres, Light* light, float
 
     checkErrorsCuda(cudaMalloc((void**) &fb_device, sizeof(float3) * size));
     checkErrorsCuda(cudaMalloc((void**) &spheres_dv, sizeof(Sphere) * OBJ_COUNT));
+    /*
     checkErrorsCuda(cudaMalloc((void**) &light_dv, sizeof(Light) * 1));
     checkErrorsCuda(cudaMalloc((void**) &origin_dv, sizeof(float3) * 1));
-
+    */
     cputimer_stop("CUDA Memory Allocation");
     cputimer_start();
 
     //checkErrorsCuda(cudaMemset(fb_device,0,sizeof(float3) * size));
     //checkErrorsCuda(cudaMemcpy((void*) fb_device, fb, sizeof(float3) * size, cudaMemcpyHostToDevice));
     checkErrorsCuda(cudaMemcpy((void*) spheres_dv, spheres, sizeof(Sphere) * OBJ_COUNT, cudaMemcpyHostToDevice));
+    /*
     checkErrorsCuda(cudaMemcpy((void*) light_dv, light, sizeof(Light) * 1, cudaMemcpyHostToDevice));
     checkErrorsCuda(cudaMemcpy((void*) origin_dv, origin, sizeof(float3) * 1, cudaMemcpyHostToDevice));
+    */
 
     cputimer_stop("CUDA HtoD memory transfer");
 
@@ -253,7 +271,8 @@ void run_kernel(const int size, float3* fb, Sphere* spheres, Light* light, float
     cputimer_start();
 
     dim3 blocks(WIDTH / TPB, HEIGHT / TPB);
-    cast_ray<<<blocks, dim3(TPB, TPB)>>>(fb_device, spheres_dv, light_dv, origin_dv);
+    //cast_ray<<<blocks, dim3(TPB, TPB)>>>(fb_device, spheres_dv, light_dv, origin_dv);
+    cast_ray<<<blocks, dim3(TPB, TPB)>>>(fb_device, spheres_dv, light, origin);
     cudaDeviceSynchronize();
     cputimer_stop("CUDA Kernal Launch Runtime");
 
@@ -273,8 +292,10 @@ void run_kernel(const int size, float3* fb, Sphere* spheres, Light* light, float
     cputimer_stop("CUDA DtoH memory transfer");
     checkErrorsCuda(cudaFree(fb_device));
     checkErrorsCuda(cudaFree(spheres_dv));
+    /*
     checkErrorsCuda(cudaFree(light_dv));
     checkErrorsCuda(cudaFree(origin_dv));
+    */
 }
 
 int main(int, char**) {
@@ -322,18 +343,20 @@ int main(int, char**) {
 
         //Sphere(0.25, make_float3(1.5, 0.75, -2), make_float3(0.0, 0.0, 0.0)),
     };
+    /*
     float3 *origin = new float3();
     *origin = make_float3(0, 0, 1);
 
     
     Light *light = new Light(make_float3(1, 1, 1), make_float3(1, 1, 1));
     light->set_light(.2, .5, .5);
+    */
     
-    /*
+    float3 origin;
+    origin = make_float3(0, 0, 1);
+
     Light light = Light(make_float3(1, 1, 1), make_float3(1, 1, 1));
     light.set_light(.2, .5, .5);
-    */
-
 
     std::cout << "===========================================" << std::endl;
     std::cout << ">> Starting kernel for " << WIDTH << "x" << HEIGHT << " image..." << std::endl;
@@ -349,7 +372,7 @@ int main(int, char**) {
 
     file << "P3" << "\n" << WIDTH << " " << HEIGHT << "\n" << "255\n";
     for (std::size_t i = 0; i < n; ++i) {
-        file << (int) frame_buffer[i].x << " " << (int) frame_buffer[i].y << " " << (int) frame_buffer[i].z << "\n";
+        file << static_cast<int>(frame_buffer[i].x) << " " << static_cast<int>(frame_buffer[i].y) << " " << static_cast<int>(frame_buffer[i].z) << "\n";
         /*
         mem_buffer.push_back(std::to_string((int) frame_buffer[i].x) + " " + 
                              std::to_string((int) frame_buffer[i].y) + " " + 
@@ -365,8 +388,10 @@ int main(int, char**) {
 
     //delete[] frame_buffer;
     cudaFreeHost(frame_buffer);
+    /*
     delete origin;
     delete light;
+    */
     delete[] spheres;
 
     return EXIT_SUCCESS;
