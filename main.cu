@@ -69,7 +69,7 @@ __host__ __device__ float3 Ray::at(float t) const {
 __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
     float a = dot(dir, dir);
     float b = dot((2.0f * (dir)), (origin - sphere.center));
-    #define c dot((origin - sphere.center), (origin - sphere.center)) - pow(sphere.radius, 2)
+    #define c (dot((origin - sphere.center), (origin - sphere.center)) - pow(sphere.radius, 2))
 
     float d = b*b - 4 * (a * c);
     if(d < 0) return -1.0;
