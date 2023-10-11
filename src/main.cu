@@ -119,6 +119,18 @@ __global__ void cast_ray(float3* fb, Sphere* spheres, Light light, float3 origin
     int i = (blockIdx.x * blockDim.x) + threadIdx.x;
     int j = (blockIdx.y * blockDim.y) + threadIdx.y;
 
+    __shared__ Sphere shared_spheres[OBJ_COUNT];
+
+    if(threadIdx.x * blockDim.y + threadIdx.y < OBJ_COUNT){
+        shared_spheres[threadIdx.x * blockDim.x + threadIdx.y] = spheres[threadIdx.x * blockDim.x + threadIdx.y];
+
+    }
+    __syncthreads();
+    
+    /*
+    Sphere* shared_spheres = spheres;
+    */
+
     if(i >= WIDTH || j >= HEIGHT) return;
     const int tid = (j*WIDTH) + i;
 
@@ -127,12 +139,12 @@ __global__ void cast_ray(float3* fb, Sphere* spheres, Light light, float3 origin
 
     //float intersections[OBJ_COUNT];
     float closest_intersection;
-    int hp = get_closest_intersection(spheres, r, &closest_intersection);
+    int hp = get_closest_intersection(shared_spheres, r, &closest_intersection);
 
     if(hp == -1) {
         fb[tid] = make_float3(94, 156, 255);
     } else {
-        fb[tid] = get_color_at(r, closest_intersection, light, spheres[hp], spheres, origin);
+        fb[tid] = get_color_at(r, closest_intersection, light, shared_spheres[hp], shared_spheres, origin);
     }
 }
 
