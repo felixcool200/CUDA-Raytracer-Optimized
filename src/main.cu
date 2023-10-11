@@ -215,6 +215,7 @@ int main(int, char**) {
 
     cputimer_start();
     float3* frame_buffer;
+    //checkErrorsCuda(cudaMallocHost((void**)&frame_buffer, sizeof(float3) * n), cudaHostAllocDefault);
     checkErrorsCuda(cudaMallocManaged((void**)&frame_buffer, sizeof(float3) * n));
     checkErrorsCuda(cudaMemPrefetchAsync(frame_buffer, n*sizeof(float3), cudaCpuDeviceId));
     cputimer_stop("UNIFED Memory Allocation");
