@@ -152,19 +152,18 @@ void initDevice(int& device_handle) {
     cudaDeviceProp devProp;
     cudaGetDeviceProperties(&devProp, 0);
     printDeviceProps(devProp);
-  
     cudaSetDevice(device_handle);
 }
 
 //void run_kernel(const int size, float3* fb, Sphere* spheres, Light* light, float3* origin) {
 void run_kernel(const int size, float3* fb, Sphere* spheres, Light light, float3 origin) {
-    float3* fb_device = nullptr;
     Sphere* spheres_dv = nullptr;
+    //float3* fb_device = nullptr;
 
     std::cout << "Size is: " << sizeof(float3) * size << std::endl;
 
     cputimer_start();
-    checkErrorsCuda(cudaMalloc((void**) &fb_device, sizeof(float3) * size));
+    //checkErrorsCuda(cudaMalloc((void**) &fb_device, sizeof(float3) * size));
     checkErrorsCuda(cudaMalloc((void**) &spheres_dv, sizeof(Sphere) * OBJ_COUNT));
     cputimer_stop("CUDA Memory Allocation");
     
@@ -173,20 +172,31 @@ void run_kernel(const int size, float3* fb, Sphere* spheres, Light light, float3
     cputimer_stop("CUDA HtoD memory transfer");
 
     cputimer_start();
+    checkErrorsCuda(cudaMemPrefetchAsync(fb, size*sizeof(float3), 0));
+    cputimer_stop("Prefetching GPU memory");
+
+    cputimer_start();
     dim3 blocks(WIDTH / TPB, HEIGHT / TPB);
-    cast_ray<<<blocks, dim3(TPB, TPB)>>>(fb_device, spheres_dv, light, origin);
+    cast_ray<<<blocks, dim3(TPB, TPB)>>>(fb, spheres_dv, light, origin);
     cudaDeviceSynchronize();
     cputimer_stop("CUDA Kernal Launch Runtime");
-
-    cputimer_start();
-
-    checkErrorsCuda(cudaMemcpy(fb, fb_device, sizeof(float3) * size, cudaMemcpyDeviceToHost));
     
-    cputimer_stop("CUDA DtoH memory transfer");
+    /*
     cputimer_start();
-    checkErrorsCuda(cudaFree(fb_device));
+    checkErrorsCuda(cudaMemPrefetchAsync(fb, size*sizeof(float3), cudaCpuDeviceId));
+    cputimer_stop("Prefetching HOST memory");
+    */
+
+    /*
+    cputimer_start();
+    checkErrorsCuda(cudaMemcpy(fb, fb_device, sizeof(float3) * size, cudaMemcpyDeviceToHost));
+    cputimer_stop("CUDA DtoH memory transfer");
+    */
+
+    cputimer_start();
+    //checkErrorsCuda(cudaFree(fb_device));
     checkErrorsCuda(cudaFree(spheres_dv));
-    cputimer_stop("CUDA Free");
+    cputimer_stop("CUDA Pinned Memory Free");
 }
 
 int main(int, char**) {
@@ -195,16 +205,21 @@ int main(int, char**) {
     const int n = WIDTH * HEIGHT;
     int device_handle = 0;
 
-    float3* frame_buffer;
-    cudaMallocHost((void**)&frame_buffer, sizeof(float3) * n,cudaHostAllocDefault);
-
     int deviceCount = 0;
     checkErrorsCuda(cudaGetDeviceCount(&deviceCount));
     if(deviceCount == 0) {
         std::cerr << "initDevice(): No CUDA Device found." << std::endl;
         return EXIT_FAILURE;
     }
-    initDevice(device_handle);
+    //initDevice(device_handle);
+
+    cputimer_start();
+    float3* frame_buffer;
+    checkErrorsCuda(cudaMallocManaged((void**)&frame_buffer, sizeof(float3) * n));
+    checkErrorsCuda(cudaMemPrefetchAsync(frame_buffer, n*sizeof(float3), cudaCpuDeviceId));
+    cputimer_stop("UNIFED Memory Allocation");
+    //cudaMallocHost((void**)&frame_buffer, sizeof(float3) * n,cudaHostAllocDefault);
+
 
     // Create an array of spheres
     Sphere *spheres = new Sphere[OBJ_COUNT] {
@@ -243,12 +258,10 @@ int main(int, char**) {
     std::cout << "===========================================" << std::endl;
     std::cout << ">> Starting kernel for " << WIDTH << "x" << HEIGHT << " image..." << std::endl;
     
-    
     run_kernel(n, frame_buffer, spheres, light, origin);
     
-    
     std::cout << ">> Finished kernel" << std::endl;
-
+    
     auto start = std::chrono::steady_clock::now();
     std::cout << ">> Saving Image..." << std::endl;
 
@@ -259,14 +272,17 @@ int main(int, char**) {
     auto end = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     std::cout << ">> Finished writing to file in " << end << " ms" << std::endl;
     std::cout << "===========================================" << std::endl;
+    
 
+    cputimer_start();
     //delete[] frame_buffer;
-    cudaFreeHost(frame_buffer);
+    //cudaFreeHost(frame_buffer);
+    cudaFree(frame_buffer);
     /*
     delete origin;
     delete light;
     */
     delete[] spheres;
-
+    cputimer_stop("HOST Unified Memory Free");
     return EXIT_SUCCESS;
 }
