@@ -211,7 +211,7 @@ int main(int, char**) {
         std::cerr << "initDevice(): No CUDA Device found." << std::endl;
         return EXIT_FAILURE;
     }
-    //initDevice(device_handle);
+    initDevice(device_handle);
 
     cputimer_start();
     float3* frame_buffer;
