@@ -16,7 +16,6 @@
 
 //#define tidGLOBAL ((blockIdx.y * blockDim.y) + threadIdx.y*WIDTH) + (blockIdx.x * blockDim.x) + threadIdx.x
 
-
 //const int MAX_THREADS_PER_BLOCK = 1024;
 const int TPB = 32;
 
@@ -50,29 +49,6 @@ __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* in
     
     default:
         int hp = -1;
-            *intersections = 100.0;
-            float tmp_intersection;
-            for(int ii = 0; ii < OBJ_COUNT; ++ii) {
-                //intersections[ii] = r.has_intersection(spheres[ii]);
-                tmp_intersection = r.has_intersection(spheres[ii]);
-                if (tmp_intersection < 0.0) {
-                    continue;
-                }
-                else if (tmp_intersection < *intersections) {
-                    *intersections = tmp_intersection;
-                    hp = ii;
-                }
-            }
-            return hp;
-    }
-    /*
-    #if OBJ_COUNT == 0
-        break;
-    #elif OBJ_COUNT == 1
-        intersections[0] = r.has_intersection(spheres[ii]);
-        return intersections[0] < 0 ? -1 : 0;
-    #else
-        int hp = -1;
         *intersections = 100.0;
         float tmp_intersection;
         for(int ii = 0; ii < OBJ_COUNT; ++ii) {
@@ -87,12 +63,10 @@ __device__ int get_closest_intersection(Sphere* spheres, const Ray &r, float* in
             }
         }
         return hp;
-    #endif
-    */
+    }
 }
 
 __device__ Color get_color_at(const Ray &r, float intersection, Light light, const Sphere &sphere, Sphere* spheres, float3 origin) {
-    //long start = clock();
     const float offset_surface = 0.001;
     float shadow = 1.0;
 
@@ -113,6 +87,7 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light light, con
     int hp = get_closest_intersection(spheres, rr, &closest_intersection);
     bool reflect = false;
     float reflect_shadow = 1;
+
     if (hp != -1) {
         reflect = true;
         Ray rs(rr.at(closest_intersection) + offset_surface * spheres[hp].get_normal_at(rr.at(closest_intersection)), light.get_position() - rr.at(closest_intersection) + offset_surface * spheres[hp].get_normal_at(rr.at(closest_intersection)));
@@ -123,13 +98,6 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light light, con
             }
         }
     }
-
-    /*
-    auto ambient = light->get_ambient() * light->get_color(); 
-    auto diffuse = (light->get_diffuse() * fmaxf(dot(light_ray, normal), 0.0f)) * light->get_color();
-    auto specular = light->get_specular() * pow(fmaxf(dot(reflection_ray, to_camera), 0.0f), 32) * light->get_color();
-    //ambientDiffuseSpecular was ambient+diffuse+specular 
-    */
 
     float3 ambientDiffuseSpecular = light.get_ambient() * light.get_color(); 
     ambientDiffuseSpecular = ((light.get_diffuse() * fmaxf(dot(light_ray, normal), 0.0f)) * light.get_color()) + ambientDiffuseSpecular;
@@ -144,10 +112,6 @@ __device__ Color get_color_at(const Ray &r, float intersection, Light light, con
     }
     auto all_light = reflect ? capVec3 ((ambientDiffuseSpecular),1) & (0.55 * (sphere.color - (reflect_shadow * spheres[hp].color))) + capVec3((reflect_shadow * spheres[hp].color),1)
                              : capVec3((ambientDiffuseSpecular),1) & sphere.color;
-    /*if(tidGLOBAL == 0){
-        long stop = clock();
-        printf("get_color_at: %08lu",stop-start);
-    }*/
     return convert_to_color(shadow * all_light);
 }
 
@@ -157,7 +121,6 @@ __global__ void cast_ray(float3* fb, Sphere* spheres, Light light, float3 origin
 
     if(i >= WIDTH || j >= HEIGHT) return;
     const int tid = (j*WIDTH) + i;
-    //int tid = (j*WIDTH) + i;
 
     const float3 ij = make_float3(2 * (float((i) + 0.5) / (WIDTH - 1)) - 1, 1 - 2 * (float((j) + 0.5) / (HEIGHT - 1)), -1);
     Ray r(origin, ij - origin);
@@ -185,85 +148,43 @@ void initDevice(int& device_handle) {
 void run_kernel(const int size, float3* fb, Sphere* spheres, Light light, float3 origin) {
     float3* fb_device = nullptr;
     Sphere* spheres_dv = nullptr;
-    /*
-    Light* light_dv = nullptr;
-    float3* origin_dv = nullptr;
-    */
 
     std::cout << "Size is: " << sizeof(float3) * size << std::endl;
 
     cputimer_start();
-
     checkErrorsCuda(cudaMalloc((void**) &fb_device, sizeof(float3) * size));
     checkErrorsCuda(cudaMalloc((void**) &spheres_dv, sizeof(Sphere) * OBJ_COUNT));
-    /*
-    checkErrorsCuda(cudaMalloc((void**) &light_dv, sizeof(Light) * 1));
-    checkErrorsCuda(cudaMalloc((void**) &origin_dv, sizeof(float3) * 1));
-    */
     cputimer_stop("CUDA Memory Allocation");
+    
     cputimer_start();
-
-    //checkErrorsCuda(cudaMemset(fb_device,0,sizeof(float3) * size));
-    //checkErrorsCuda(cudaMemcpy((void*) fb_device, fb, sizeof(float3) * size, cudaMemcpyHostToDevice));
     checkErrorsCuda(cudaMemcpy((void*) spheres_dv, spheres, sizeof(Sphere) * OBJ_COUNT, cudaMemcpyHostToDevice));
-    /*
-    checkErrorsCuda(cudaMemcpy((void*) light_dv, light, sizeof(Light) * 1, cudaMemcpyHostToDevice));
-    checkErrorsCuda(cudaMemcpy((void*) origin_dv, origin, sizeof(float3) * 1, cudaMemcpyHostToDevice));
-    */
-
     cputimer_stop("CUDA HtoD memory transfer");
 
-    //cputimer_start();
-
-    //cputimer_stop("CUDA HtoD memory transfer");
-
-    /*
-    cudaEvent_t start, stop;
-    float time = 0;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    cudaEventRecord(start, 0);
-    */
     cputimer_start();
-
     dim3 blocks(WIDTH / TPB, HEIGHT / TPB);
-    //cast_ray<<<blocks, dim3(TPB, TPB)>>>(fb_device, spheres_dv, light_dv, origin_dv);
     cast_ray<<<blocks, dim3(TPB, TPB)>>>(fb_device, spheres_dv, light, origin);
     cudaDeviceSynchronize();
     cputimer_stop("CUDA Kernal Launch Runtime");
 
-    /*
-    cudaEventRecord(stop, 0);
-    cudaEventSynchronize(stop);
-    cudaEventElapsedTime(&time, start, stop);
-    printf(">> time for kernel: %f ms\n", time);
-
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-    */
     cputimer_start();
 
     checkErrorsCuda(cudaMemcpy(fb, fb_device, sizeof(float3) * size, cudaMemcpyDeviceToHost));
     
     cputimer_stop("CUDA DtoH memory transfer");
+    cputimer_start();
     checkErrorsCuda(cudaFree(fb_device));
     checkErrorsCuda(cudaFree(spheres_dv));
-    /*
-    checkErrorsCuda(cudaFree(light_dv));
-    checkErrorsCuda(cudaFree(origin_dv));
-    */
+    cputimer_stop("CUDA Free");
 }
 
 int main(int, char**) {
-    std::ofstream file("img.ppm");
+    std::ofstream file("/tmp/img.ppm");
 
     const int n = WIDTH * HEIGHT;
     int device_handle = 0;
 
-    //float3* frame_buffer = new float3[n];
     float3* frame_buffer;
     cudaMallocHost((void**)&frame_buffer, sizeof(float3) * n,cudaHostAllocDefault);
-    //std::vector<std::string> mem_buffer;
 
     int deviceCount = 0;
     checkErrorsCuda(cudaGetDeviceCount(&deviceCount));
@@ -299,14 +220,6 @@ int main(int, char**) {
 
         //Sphere(0.25, make_float3(1.5, 0.75, -2), make_float3(0.0, 0.0, 0.0)),
     };
-    /*
-    float3 *origin = new float3();
-    *origin = make_float3(0, 0, 1);
-
-    
-    Light *light = new Light(make_float3(1, 1, 1), make_float3(1, 1, 1));
-    light->set_light(.2, .5, .5);
-    */
     
     float3 origin;
     origin = make_float3(0, 0, 1); //Standard
@@ -330,15 +243,7 @@ int main(int, char**) {
     file << "P3" << "\n" << WIDTH << " " << HEIGHT << "\n" << "255\n";
     for (std::size_t i = 0; i < n; ++i) {
         file << static_cast<int>(frame_buffer[i].x) << " " << static_cast<int>(frame_buffer[i].y) << " " << static_cast<int>(frame_buffer[i].z) << "\n";
-        /*
-        mem_buffer.push_back(std::to_string((int) frame_buffer[i].x) + " " + 
-                             std::to_string((int) frame_buffer[i].y) + " " + 
-                             std::to_string((int) frame_buffer[i].z));
-        */
     }
-    //std::ostream_iterator<std::string> output_iterator(file, "\n");
-    //std::copy(mem_buffer.begin(), mem_buffer.end(), output_iterator);
-
     auto end = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
     std::cout << ">> Finished writing to file in " << end << " ms" << std::endl;
     std::cout << "===========================================" << std::endl;
