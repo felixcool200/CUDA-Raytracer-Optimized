@@ -30,8 +30,8 @@ __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
         return -1.0;
     }
 
-    const float t0 = ((-b - std::sqrt(d)) / (2*a));
-    const float t1 = ((-b + std::sqrt(d)) / (2*a));
+    const float t0 = ((-b - sqrtf(d)) / (2*a));
+    const float t1 = ((-b + sqrtf(d)) / (2*a));
 
     const bool t0_is_neg = t0 < 0;
     const bool t1_is_neg = t1 < 0;
