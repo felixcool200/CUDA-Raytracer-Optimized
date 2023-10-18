@@ -18,9 +18,9 @@ __host__ __device__ float3 Ray::at(float t) const {
 }
 
 __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
-    const float a = dot(dir, dir);
-    const float b = dot((2.0f * dir), (origin - sphere.center));
-    const float c = dot((origin - sphere.center), (origin - sphere.center)) - sphere.radius*sphere.radius;
+    const float a = dot_float3(dir, dir);
+    const float b = dot_float3((2.0f * dir), (origin - sphere.center));
+    const float c = dot_float3((origin - sphere.center), (origin - sphere.center)) - sphere.radius*sphere.radius;
 
     const float d = b*b - 4 * (a * c);
     
@@ -33,6 +33,7 @@ __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
     const float t0 = ((-b - sqrtf(d)) / (2*a));
     const float t1 = ((-b + sqrtf(d)) / (2*a));
 
+    /*
     const bool t0_is_neg = t0 < 0;
     const bool t1_is_neg = t1 < 0;
 
@@ -40,21 +41,12 @@ __host__ __device__ float Ray::has_intersection(const Sphere& sphere) const {
     //return ((d_is_neg*-1) + !d_is_neg*((t0_is_neg*t1_is_neg * -1) + (t0_is_neg*!t1_is_neg * t1) + (!t0_is_neg*t1_is_neg *t0) + (!t0_is_neg*!t1_is_neg *fminf(t0,t1))));
     
     return ((t0_is_neg*t1_is_neg * -1) + (t0_is_neg*!t1_is_neg * t1) + (!t0_is_neg*t1_is_neg *t0) + (!t0_is_neg*!t1_is_neg *fminf(t0,t1)));
-
-    /*
-    if(d == 0 || t0 > 0 && t1 < 0) {
-        return t0;
-    }
-    
-    if(t0 < 0 && t1 < 0) {
-        return -1;
-    }
-
-    if(t0 < 0 && t1 > 0) {
-        return t1;
-    }
-    return fminf(t0,t1);
-    //return t0 < t1 ? t0 : t1;
     */
+
+    
+    if(d == 0 || t0 > 0 && t1 < 0) {return t0;}
+    if(t0 < 0 && t1 < 0) { return -1;}
+    if(t0 < 0 && t1 > 0) { return t1;}
+    return fminf(t0,t1);
     
 }
