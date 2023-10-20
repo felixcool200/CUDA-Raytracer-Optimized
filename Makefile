@@ -1,4 +1,4 @@
-all:
+run:
 	nvcc --default-stream per-thread -arch=sm_61 src/main.cu -o gpu.out
 gprof: 
 	nvcc --profile --default-stream per-thread -arch=sm_61 src/main.cu -o gpu.out 
