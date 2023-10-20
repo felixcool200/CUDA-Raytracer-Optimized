@@ -2,7 +2,7 @@
 A simple ray tracer written with CUDA that saves its output in a .ppm file, This is an attempt to optimize the code from the following repo: https://github.com/xkevio/CUDA-Raytracer
 
 ## How to run
-To compile the code simply use ```make all```.
+To compile the code simply use ```make run```.
 
 Then run ./gpu.out.
 
