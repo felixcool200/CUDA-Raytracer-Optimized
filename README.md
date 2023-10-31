@@ -6,6 +6,6 @@ To compile the code simply use ```make run```.
 
 Then run ./gpu.out.
 
-This will generate an image called img.ppm
+This will generate an image called ```img.ppm```
 
 NOTE: if 8192x8192 pixels are used the image will be around 670 MBs.
